@@ -17,6 +17,44 @@ function makeDialer() {
   });
 }
 
+function makeExecHarness({responseReason = 'OK', modifyError} = {}) {
+  const events = [];
+  const dialer = makeDialer();
+  dialer.removeAllListeners('callStatusChange');
+  dialer.on('callStatusChange', (status) => events.push(status));
+  dialer.target.number = '+15551234567';
+  dialer.callInfo = {};
+  dialer.startSpan = () => ({setAttributes: noop, end: noop});
+  dialer._createMediaEndpoint = async() => ({
+    uuid: 'endpoint-1',
+    local: {sdp: 'local-sdp'},
+    modify: async() => {
+      if (modifyError) throw modifyError;
+    },
+    destroy: async() => {}
+  });
+
+  const dialog = {
+    remote: {sdp: 'remote-sdp'},
+    res: {
+      reason: responseReason,
+      has: () => false,
+      get: () => undefined
+    },
+    on: function() { return this; }
+  };
+  const srf = {
+    locals: {
+      dbHelpers: {updateCallStatus: async() => {}},
+      serviceUrl: 'https://example.test',
+      fsUUID: undefined
+    },
+    createUAC: async() => dialog
+  };
+
+  return {dialer, events, srf};
+}
+
 test('SIP response evidence headers are allowlisted', (t) => {
   const values = {
     reason: 'Q.850;cause=31',
@@ -85,5 +123,34 @@ test('status callbacks do not reuse SIP evidence from a previous message', (t) =
   t.ok(payloads[0].sipEvidence);
   t.notOk(payloads[1].headers);
   t.notOk(payloads[1].sipEvidence);
+  t.end();
+});
+
+test('observed 200 evidence preserves the provider reason phrase', async(t) => {
+  const {dialer, events, srf} = makeExecHarness({responseReason: 'Call Accepted'});
+
+  await dialer.exec(srf, {}, {});
+
+  const connected = events.find(({callStatus}) => callStatus === CallStatus.InProgress);
+  t.equal(connected.sipStatus, 200);
+  t.equal(connected.sipReason, 'Call Accepted');
+  t.equal(connected.sipEvidence.responseCode, 200);
+  t.equal(connected.sipEvidence.responseText, 'Call Accepted');
+  t.equal(connected.sipEvidence.evidenceQuality, 'observed');
+  t.end();
+});
+
+test('post-answer media failures do not invent an observed SIP 500', async(t) => {
+  const {dialer, events, srf} = makeExecHarness({
+    modifyError: new Error('media attachment failed')
+  });
+
+  await dialer.exec(srf, {}, {});
+
+  const failed = events.find(({callStatus}) => callStatus === CallStatus.Failed);
+  t.equal(failed.sipStatus, 500);
+  t.equal(failed.sipEvidence.messageKind, 'synthetic_status');
+  t.equal(failed.sipEvidence.evidenceQuality, 'inferred');
+  t.notOk(failed.sipEvidence.responseCode);
   t.end();
 });
