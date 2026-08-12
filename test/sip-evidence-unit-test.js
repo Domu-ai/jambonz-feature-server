@@ -59,6 +59,8 @@ test('SIP response evidence headers are allowlisted', (t) => {
   const values = {
     reason: 'Q.850;cause=31',
     'x-khomp-analytics-cc': 'Voice mail',
+    'x-domu-khomp-carrier-answered-at': '2026-08-12T11:20:01',
+    'x-domu-khomp-analytics-detected-at': '2026-08-12T11:20:04',
     authorization: 'secret',
     'x-customer-data': 'private'
   };
@@ -69,7 +71,9 @@ test('SIP response evidence headers are allowlisted', (t) => {
 
   t.deepEqual(makeDialer()._extractSipEvidenceHeaders(message), {
     Reason: 'Q.850;cause=31',
-    'X-Khomp-Analytics-CC': 'Voice mail'
+    'X-Khomp-Analytics-CC': 'Voice mail',
+    'X-Domu-Khomp-Carrier-Answered-At': '2026-08-12T11:20:01',
+    'X-Domu-Khomp-Analytics-Detected-At': '2026-08-12T11:20:04'
   });
   t.end();
 });
